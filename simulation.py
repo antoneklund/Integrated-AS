@@ -15,151 +15,43 @@ N_CODES = [
     "n=10000 eps=0.00"
 ]
 
-
-
-
-def create_data_with_partition(fraction_negative=0.2, N=10000):
-    dataset = [1] * int(N * (1 - fraction_negative))
-    dataset = dataset + [0] * int(N * fraction_negative)
-    np.random.shuffle(dataset)
-    return dataset
-
-
-def simulate_with_recorded_history(dataset, max_n, repeat=10):
-    print("Simulating")
-    timeline_data = []
-    for id in range(repeat):
-        ids = [id] * max_n
-        print(ids)
-        np.random.shuffle(dataset)
-        cumsum = np.cumsum(dataset[:max_n])
-        n_values = np.arange(1, max_n + 1)
-        averaged_sum = cumsum / n_values
-        timeline_data.extend(zip(ids, n_values, averaged_sum))
-
-    timeline = pd.DataFrame(timeline_data, columns=["id", "n", "score"])
-    return timeline
-
-
-def remove_list_in_labels_column(annotated_df):
-    annotated_df["label"] = annotated_df["label"].apply(
-        lambda x: x[0] if isinstance(x, list) else x
-    )
-    return annotated_df
-
-
-def add_score_based_on_label(annotated_df):
-    annotated_df["score"] = annotated_df["label"].apply(
-        lambda x: 1 if x == "Football" else 0
-    )
-    return annotated_df
-
-
-def annotated_data_with_recorded_history(annotated_dfs):
-    timeline_data = []
-    for annotator_id, annotated_df in enumerate(annotated_dfs):
-        # annotated_df["cls_label"].replace(2, 0, inplace=True)
-        annotated_df = add_score_based_on_label(annotated_df)
-        cumsum = np.cumsum(annotated_df.score)
-        n_values = np.arange(1, len(cumsum) + 1)
-        averaged_sum = cumsum / n_values
-        annotator_id_list = [annotator_id] * len(cumsum)
-        timeline_data.extend(zip(annotator_id_list, n_values, averaged_sum))
-        print(averaged_sum.tail(1))
-    timeline = pd.DataFrame(timeline_data, columns=["annotator_id", "n", "score"])
-    return timeline
-
-
-def simulate(fraction_negative=0.2, N=10):
-    dataset = create_data_with_partition(fraction_negative=fraction_negative, N=N)
-    n = sampling_from_a_finite_population(epsilon=0.02, population_size=N)
-    timeline = simulate_with_recorded_history(dataset=dataset, max_n=n)
-    print(timeline)
-    return timeline
-
-
-def visualize_timeline(timeline):
-    print("Plotting")
-    sns.set_style("whitegrid")
-    # sns.relplot(data=timeline, hue="id", x="n", y="score", kind="line") #  errorbar=("ci", 98), , s=5
-    sns.lineplot(data=timeline, hue="id", x="n", y="score")
-    plt.axhline(y=0.85, color="green", linestyle="--")
-    plt.axhline(y=0.8, color="yellow", linestyle="--")
-    plt.axhline(y=0.75, color="red", linestyle="--")
-    plt.show()
+def integrated_acceptance_sampling(D, C, pi, acceptance_limit, max_iterations):
+    '''This is the code for the algorithm presented in the paper. 
+        The functions get_unseen_sample_pair and do_human_evaluation() should
+        be replaced when integrated.
+        
+        A real example of the algorithm is found in plot_truncation_simulation().
+    '''
+    def get_unseen_sample_pair(D, C):
+        document = np.random.randint(0,2)
+        classification = np.random.randint(0,2)
+        return (document, classification)
+    
+    def do_human_evaluation(document, classification):
+        return document == classification
+        
+    accepted = 0
+    iterations = 0
+    iterations_min = np.floor(1 - acceptance_limit)
+    truncate = False
+    while (not truncate) and (iterations<max_iterations):
+        iterations += 1
+        (document, classification) = get_unseen_sample_pair()
+        pair_ok = do_human_evaluation(document, classification)
+        if pair_ok:
+            accepted += 1
+        if iterations > iterations_min:
+            accuracy = accepted/iterations
+            truncate = limit_included_in_range_possible_values(iterations, accuracy, pi, acceptance_limit)
+    if accuracy >= acceptance_limit:
+        print("Accept classifier")
+    else:
+        print("Reject classifier")
 
 
 def calculate_acceptance_limit_from_sample_size(n, limit_percentage):
     acceptance_limit = int(np.ceil(limit_percentage * n))
     return acceptance_limit
-
-
-def simulate_acceptance_sampling(N, repeat=1000):
-    accepts = []
-    repeated_fractions = []
-    n_ids = []
-    fractions = np.arange(start=0.0, stop=0.21, step=0.01)
-    print(fractions)
-    for frac in fractions:
-        dataset = create_data_with_partition(fraction_negative=frac, N=N)
-        n = sampling_from_a_finite_population(epsilon=0.05, population_size=N)
-        n_modifications = [
-            sampling_from_a_finite_population(epsilon=0.1, population_size=N, pi=0.9),
-            sampling_from_a_finite_population(epsilon=0.05, population_size=N, pi=0.9),
-            sampling_from_a_finite_population(epsilon=0.02, population_size=N, pi=0.9),
-            sampling_from_a_finite_population(epsilon=0.01, population_size=N, pi=0.9),
-            N
-        ]
-        for n_code, n_id in enumerate(n_modifications):
-            acceptance_limit = calculate_acceptance_limit_from_sample_size(
-                n_id, limit_percentage=0.1
-            )
-            for _ in range(repeat):
-                repeated_fractions.append(np.around(frac, decimals=2))
-                n_ids.append(N_CODES[n_code])
-                np.random.shuffle(dataset)
-                accept = acceptance_sampling(dataset, n_id, acceptance_limit)
-                accepts.append(accept)
-    print(f"n is {n_modifications}")
-    as_df = pd.DataFrame()
-    as_df["fraction"] = repeated_fractions
-    as_df["n"] = n_ids
-    as_df["accept"] = accepts
-    # data=[repeated_fractions, accepts], columns=["fraction", "accept"]
-    return as_df
-
-
-def acceptance_sampling(dataset, n, acceptance_limit):
-    sample = dataset[0:n]
-    unique, counts = np.unique(sample, return_counts=True)
-    if unique[0] == 0:
-        nonconforming = counts[0]  # count of zeros
-    else:
-        nonconforming = 0  # no zeros in sample
-    if nonconforming <= acceptance_limit:
-        return True
-    else:
-        return False
-
-
-def visualize_acceptance_sampling_fractions_and_epsilon(as_df):
-    sns.set_style("whitegrid")
-    plt.rcParams['figure.figsize'] = 5, 3
-    ax = sns.lineplot(
-        data=as_df,
-        x="fraction",
-        y="accept",
-        hue="n",
-        markers=True,
-        errorbar=("ci", 100),
-    )
-    plt.title("Chance of acceptance for different compositions of a dataset with N=10000")
-    ax.set_xticks(as_df.fraction.unique())
-    plt.xlabel("Fraction of FP")
-    plt.ylabel("Probability of acceptance")
-    plt.xticks(rotation=45)
-    plt.savefig("acceptance_sampling_sim.png", bbox_inches="tight")
-    plt.show()
 
 
 def plot_truncation_simulation(lang="english", iterations=20, truncation=True, acceptance_limit=0.9, pi=0.9):
@@ -281,7 +173,7 @@ def limit_included_in_range_possible_values(n, acc, pi=0.9, limit=0.9):
         return True
     
 
-def decision_to_sample_size(max_samples=136, acceptance_limit=0.9, num_simulations=1000):
+def samples_until_decision(max_samples=136, acceptance_limit=0.9, num_simulations=1000):
     def sampling_until_rejection(defect_rate, max_samples=136, acceptance_limit=0.9):
         num_samples = 0
         accepts_found = 0
